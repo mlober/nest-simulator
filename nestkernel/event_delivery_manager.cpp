@@ -50,6 +50,7 @@ EventDeliveryManager::EventDeliveryManager()
   : off_grid_spiking_( false )
   , moduli_()
   , slice_moduli_()
+  , send_buffer_position_()
   , spike_register_()
   , off_grid_spike_register_()
   , send_buffer_secondary_events_()
@@ -82,6 +83,7 @@ EventDeliveryManager::initialize()
   reset_counters();
   reset_timers_for_preparation();
   reset_timers_for_dynamics();
+  send_buffer_position_.resize( num_threads + 1, 0 );
   spike_register_.resize( num_threads );
   off_grid_spike_register_.resize( num_threads );
   gather_completed_checker_.initialize( num_threads, false );
@@ -117,6 +119,7 @@ EventDeliveryManager::finalize()
     delete ( *it );
   }
   spike_register_.clear();
+  send_buffer_position_.clear();
   std::vector< std::vector< std::vector< std::vector< OffGridTarget > > > >().swap( off_grid_spike_register_ );
 
   send_buffer_secondary_events_.clear();
@@ -359,27 +362,29 @@ EventDeliveryManager::gather_spike_data_( const thread tid,
       sw_collocate_spike_data_.start();
     }
 #endif
+    // Reset complete marker
+    send_buffer[ send_buffer.size() - 1 ].reset_marker();
   }
 #pragma omp barrier
-    const AssignedRanks assigned_ranks = kernel().vp_manager.get_assigned_ranks( tid );
-    // Need to get new positions in case buffer size has changed
-    SendBufferPosition send_buffer_position(
-      assigned_ranks, kernel().mpi_manager.get_send_recv_count_spike_data_per_rank() );
 
     // Collocate spikes to send buffer
-    collocate_spike_data_buffers_( tid, assigned_ranks, send_buffer_position, spike_register_, send_buffer );
+    collocate_spike_data_buffers_( tid, spike_register_, send_buffer );
 
 #pragma omp barrier
-    // Set markers to signal end of valid spikes, and remove spikes
-    // from register that have been collected in send buffer.
-    set_end_and_invalid_markers_( assigned_ranks, send_buffer_position, send_buffer );
-
-    // If we do not have any spikes left, set corresponding marker in
-    // send buffer.
-    set_complete_marker_spike_data_( assigned_ranks, send_buffer_position, send_buffer );
-
 #pragma omp master
   {
+    if ( send_buffer_position_[ kernel().vp_manager.get_num_threads() ] > 0 )
+    {
+      // mark last valid entry as end
+      send_buffer[ send_buffer_position_[ kernel().vp_manager.get_num_threads() ] - 1 ].set_end_marker();
+    }
+    else // there were no spikes in the spike_register
+    {
+      // -> mark first entry as invalid
+      send_buffer[ 0 ].set_invalid_marker();
+    }
+    // Assume that all spikes were tranferred from spike_register to send_buffer
+    send_buffer[ send_buffer.size() - 1 ].set_complete_marker();
 #ifdef TIMER_DETAILED
     {
       sw_collocate_spike_data_.stop();
@@ -419,34 +424,54 @@ EventDeliveryManager::gather_spike_data_( const thread tid,
 template < typename TargetT, typename SpikeDataT >
 bool
 EventDeliveryManager::collocate_spike_data_buffers_( const thread tid,
-  const AssignedRanks& assigned_ranks,
-  SendBufferPosition& send_buffer_position,
   std::vector< std::vector< std::vector< TargetT > >* >& spike_register,
   std::vector< SpikeDataT >& send_buffer )
 {
-  reset_complete_marker_spike_data_( assigned_ranks, send_buffer_position, send_buffer );
+  // Determine the position in the send buffer from where this thread (tid) starts to write
+  // -> Count the entries in the spike register for which the threads with lower ids are responsible
 
-  // Assume register is empty, will change to false if any entry can
-  // not be fit into the MPI buffer.
-  bool is_spike_register_empty = true;
-
-  index buffer_pos = 0;
-  auto end_tid = spike_register.begin() + tid + 1;
-
-  // First dimension: loop over writing thread
-  for ( typename std::vector< std::vector< std::vector< TargetT > >* >::iterator it = spike_register.begin();
-        it != end_tid;
-        ++it )
+  // Reset all but 1st entry
+  send_buffer_position_[ tid + 1 ] = 0;
+  // First dimension: this thread tid
+  // Second dimension: fixed reading thread --> REMOVE in this branch for testing
+  // Third dimension: loop over lags
+  for ( unsigned int lag = 0; lag < spike_register[ tid ]->size(); ++lag )
   {
-    // Second dimension: fixed reading thread --> REMOVE in this branch for testing
-
-    // Third dimension: loop over lags
-    for ( unsigned int lag = 0; lag < ( *it )->size(); ++lag )
-    {
-      buffer_pos += ( *( *it ) )[ lag ].size();
-    }
+    send_buffer_position_[ tid + 1 ] += ( *spike_register[ tid ] )[ lag ].size();
   }
 
+#pragma omp barrier
+#pragma omp single
+  {
+    // Also reset 1st entry
+    send_buffer_position_[ 0 ] = 0;
+
+    // std::cout << "send_buffer_position before =";
+    // for ( auto it = send_buffer_position_.begin(); it < send_buffer_position_.end(); ++it )
+    // {
+    //   std::cout << " " << *it;
+    // }
+    // std::cout << std::endl;
+    
+    std::partial_sum( send_buffer_position_.begin(), send_buffer_position_.end(), send_buffer_position_.begin() );
+
+    // std::cout << "send_buffer_position after =";
+    // for ( auto it = send_buffer_position_.begin(); it < send_buffer_position_.end(); ++it )
+    // {
+    //   std::cout << " " << *it;
+    // }
+    // std::cout << std::endl;
+
+    // Assert that total sum of entries fits into send_buffer (i.e., spike_register can be fully transferred into send_buffer)
+    assert( send_buffer_position_[ kernel().vp_manager.get_num_threads() ] < send_buffer.size() );
+  }
+
+  // Transfer all entries from spike_register to send_buffer for which this thread tid is responsible,
+  // i.e. only the entries in spike_register[ tid ]
+
+  // First dimension: this thread tid
+  // Second dimension: fixed reading thread --> REMOVE in this branch for testing
+  // Third dimension: loop over lags
   for ( unsigned int lag = 0; lag < spike_register[ tid ]->size(); ++lag )
   {
     // Fourth dimension: loop over entries
@@ -455,21 +480,17 @@ EventDeliveryManager::collocate_spike_data_buffers_( const thread tid,
           ++iiit )
     {
       assert( not iiit->is_processed() );
-      assert( buffer_pos < send_buffer.size() );
+      assert( send_buffer_position_[ tid ] < send_buffer.size() );
 
-      send_buffer[ buffer_pos ].set(
+      send_buffer[ send_buffer_position_[ tid ] ].set(
         ( *iiit ).get_tid(), ( *iiit ).get_syn_id(), ( *iiit ).get_lcid(), lag, ( *iiit ).get_offset() );
       ( *iiit ).set_status( TARGET_ID_PROCESSED ); // mark entry for removal
-      
-      ++buffer_pos;  
+
+      ++send_buffer_position_[ tid ];
     }
   }
 
-  if ( tid == kernel().vp_manager.get_num_threads() - 1 )
-  {
-    send_buffer_position.increase( 0, buffer_pos );
-  }
-  return is_spike_register_empty;
+  return true; // Assume spike_register was fully tranferred to send buffer
 }
 
 template < typename SpikeDataT >

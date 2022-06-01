@@ -258,8 +258,6 @@ private:
    */
   template < typename TargetT, typename SpikeDataT >
   bool collocate_spike_data_buffers_( const thread tid,
-    const AssignedRanks& assigned_ranks,
-    SendBufferPosition& send_buffer_position,
     std::vector< std::vector< std::vector< TargetT > >* >& spike_register,
     std::vector< SpikeDataT >& send_buffer );
 
@@ -379,6 +377,9 @@ private:
    * @see SliceRingBuffer
    */
   std::vector< delay > slice_moduli_;
+
+  /** Defines where each thread should start writing and is used to iterate while writing. */
+  std::vector< index > send_buffer_position_;
 
   /**
    * Register for node IDs of neurons that spiked. This is a 4-dim
