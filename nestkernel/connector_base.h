@@ -23,6 +23,8 @@
 #ifndef CONNECTOR_BASE_H
 #define CONNECTOR_BASE_H
 
+#define BATCH_SIZE 8
+
 // Generated includes:
 #include "config.h"
 
@@ -156,7 +158,7 @@ public:
    * source.
    */
   virtual index send( const thread tid, const index lcid, const std::vector< ConnectorModel* >& cm, Event& e ) = 0;
-  
+
   virtual index send( const thread tid, const index lcid, const std::vector< ConnectorModel* >& cm, SpikeEvent& e ) = 0;
 
   virtual void
@@ -420,26 +422,66 @@ public:
       static_cast< GenericConnectorModel< ConnectionT >* >( cm[ syn_id_ ] )->get_common_properties();
 
     index lcid_offset = 0;
-
-    while ( true )
+    bool not_done = true;
+    
+    bool source_has_more_targets;
+    index lcid_batch[ BATCH_SIZE ];
+    size_t remainder = BATCH_SIZE;
+    SpikeEvent se[ BATCH_SIZE ];
+    Node* target[ BATCH_SIZE ];
+    
+    for ( size_t i = 0; i < BATCH_SIZE; ++i )
     {
-      ConnectionT& conn = C_[ lcid + lcid_offset ];
-      const bool is_disabled = conn.is_disabled();
-      const bool source_has_more_targets = conn.source_has_more_targets();
-
-      e.set_port( lcid + lcid_offset );
-      if ( not is_disabled )
+      se[ i ] = e;
+    } 
+    
+    while ( not_done )
+    {
+      for ( size_t i = 0; i < BATCH_SIZE; ++i )
       {
-        conn.send( e, tid, cp );
-        Node* target = conn.get_target( tid );
-        target->handle( e );
-        send_weight_event( tid, lcid + lcid_offset, e, cp );
+        lcid_batch[ i ] = lcid + lcid_offset;
+        ConnectionT& conn = C_[ lcid_batch[ i ] ];
+        source_has_more_targets = conn.source_has_more_targets();
+        ++lcid_offset;
+        
+        conn.send( se[ i ], tid, cp );
+        target[ i ] = conn.get_target( tid );
+        
+        if ( not source_has_more_targets )
+        {
+          not_done = false;
+          
+          if ( i <= BATCH_SIZE - 1 )
+          {
+            remainder = i + 1;
+            break;
+          }
+        }
       }
-      if ( not source_has_more_targets )
+      
+      if ( remainder == BATCH_SIZE )
       {
-        break;
+        for ( size_t i = 0; i < BATCH_SIZE; ++i )
+        {
+          target[ i ]->handle( se[ i ] );
+        }
+        for ( size_t i = 0; i < BATCH_SIZE; ++i )
+        {
+          send_weight_event( tid, lcid_batch[ i ], se[ i ], cp );
+        }
       }
-      ++lcid_offset;
+      
+      else
+      {
+        for ( size_t i = 0; i < remainder; ++i )
+        {
+          target[ i ]->handle( se[ i ] );
+        }
+        for ( size_t i = 0; i < remainder; ++i )
+        {
+          send_weight_event( tid, lcid_batch[ i ], se[ i ], cp );
+        }
+      }   
     }
 
     return 1 + lcid_offset; // event was delivered to at least one target
