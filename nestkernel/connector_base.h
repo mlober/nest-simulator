@@ -156,6 +156,8 @@ public:
    * source.
    */
   virtual index send( const thread tid, const index lcid, const std::vector< ConnectorModel* >& cm, Event& e ) = 0;
+  
+  virtual index send( const thread tid, const index lcid, const std::vector< ConnectorModel* >& cm, SpikeEvent& e ) = 0;
 
   virtual void
   send_weight_event( const thread tid, const unsigned int lcid, Event& e, const CommonSynapseProperties& cp ) = 0;
@@ -399,6 +401,38 @@ public:
       if ( not is_disabled )
       {
         conn.send( e, tid, cp );
+        send_weight_event( tid, lcid + lcid_offset, e, cp );
+      }
+      if ( not source_has_more_targets )
+      {
+        break;
+      }
+      ++lcid_offset;
+    }
+
+    return 1 + lcid_offset; // event was delivered to at least one target
+  }
+
+  index
+  send( const thread tid, const index lcid, const std::vector< ConnectorModel* >& cm, SpikeEvent& e )
+  {
+    typename ConnectionT::CommonPropertiesType const& cp =
+      static_cast< GenericConnectorModel< ConnectionT >* >( cm[ syn_id_ ] )->get_common_properties();
+
+    index lcid_offset = 0;
+
+    while ( true )
+    {
+      ConnectionT& conn = C_[ lcid + lcid_offset ];
+      const bool is_disabled = conn.is_disabled();
+      const bool source_has_more_targets = conn.source_has_more_targets();
+
+      e.set_port( lcid + lcid_offset );
+      if ( not is_disabled )
+      {
+        conn.send( e, tid, cp );
+        Node* target = conn.get_target( tid );
+        target->handle( e );
         send_weight_event( tid, lcid + lcid_offset, e, cp );
       }
       if ( not source_has_more_targets )

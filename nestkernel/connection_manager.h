@@ -255,6 +255,9 @@ public:
 
   void
   send( const thread tid, const synindex syn_id, const index lcid, const std::vector< ConnectorModel* >& cm, Event& e );
+  
+  void
+  send( const thread tid, const synindex syn_id, const index lcid, const std::vector< ConnectorModel* >& cm, SpikeEvent& e );
 
   /**
    * Send event e to all device targets of source source_node_id
@@ -827,6 +830,16 @@ ConnectionManager::send( const thread tid,
   const index lcid,
   const std::vector< ConnectorModel* >& cm,
   Event& e )
+{
+  connections_[ tid ][ syn_id ]->send( tid, lcid, cm, e );
+}
+
+inline void
+ConnectionManager::send( const thread tid,
+  const synindex syn_id,
+  const index lcid,
+  const std::vector< ConnectorModel* >& cm,
+  SpikeEvent& e )
 {
   connections_[ tid ][ syn_id ]->send( tid, lcid, cm, e );
 }
