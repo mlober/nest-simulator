@@ -548,6 +548,7 @@ extern const Name theta_plus;
 extern const Name thread;
 extern const Name thread_local_id;
 extern const Name threshold;
+extern const Name threshold_delay;
 extern const Name threshold_spike;
 extern const Name threshold_voltage;
 extern const Name tics_per_ms;

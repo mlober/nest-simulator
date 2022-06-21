@@ -524,6 +524,7 @@ const Name theta_plus( "theta_plus" );
 const Name thread( "thread" );
 const Name thread_local_id( "thread_local_id" );
 const Name threshold( "threshold" );
+const Name threshold_delay( "threshold_delay" );
 const Name threshold_spike( "threshold_spike" );
 const Name threshold_voltage( "threshold_voltage" );
 const Name tics_per_ms( "tics_per_ms" );

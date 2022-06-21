@@ -65,6 +65,7 @@ nest::ConnectionManager::ConnectionManager()
   , connbuilder_factories_()
   , min_delay_( 1 )
   , max_delay_( 1 )
+  , threshold_delay_( delay_max )
   , keep_source_table_( true )
   , connections_have_changed_( false )
   , get_connections_has_been_called_( false )
@@ -124,6 +125,8 @@ nest::ConnectionManager::initialize()
   // this change in delays.
   min_delay_ = max_delay_ = 1;
 
+  threshold_delay_ = delay_max;
+
   sw_construction_connect.reset();
 }
 
@@ -181,6 +184,21 @@ nest::ConnectionManager::set_status( const DictionaryDatum& d )
   {
     update_delay_extrema_();
   }
+
+  double threshold_delay_tmp = 0.;
+  if ( updateValue< double >( d, names::threshold_delay, threshold_delay_tmp ) )
+  {
+    // Translating to steps rounds the delay up.
+    delay new_threshold_delay_steps = Time( Time::ms_stamp( threshold_delay_tmp ) ).get_steps();
+    if ( threshold_delay_ < 0 )
+    {
+      throw KernelException( "Threshold value for delay must be larger than zero." );
+    }
+    else
+    {
+      threshold_delay_ = new_threshold_delay_steps;
+    }
+  }
 }
 
 nest::DelayChecker&
@@ -195,6 +213,7 @@ nest::ConnectionManager::get_status( DictionaryDatum& dict )
   update_delay_extrema_();
   def< double >( dict, names::min_delay, Time( Time::step( min_delay_ ) ).get_ms() );
   def< double >( dict, names::max_delay, Time( Time::step( max_delay_ ) ).get_ms() );
+  def< double >( dict, names::threshold_delay, Time( Time::step( threshold_delay_ ) ).get_ms() );
 
   const size_t n = get_num_connections();
   def< long >( dict, names::num_connections, n );

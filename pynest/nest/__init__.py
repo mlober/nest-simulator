@@ -151,6 +151,9 @@ class NestModule(types.ModuleType):
     min_delay = KernelAttribute(
         "float", "The minimum delay in the network", default=0.1
     )
+    threshold_delay = KernelAttribute(
+        "float", "The threshold for short/long delays in the network"
+    )
     ms_per_tic = KernelAttribute(
         "float", "The number of milliseconds per tic", default=0.001
     )

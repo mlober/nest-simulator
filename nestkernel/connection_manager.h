@@ -593,6 +593,8 @@ private:
 
   delay max_delay_; //!< Value of the largest delay in the network in steps.
 
+  delay threshold_delay_;
+
   //! Whether to keep source table after connection setup is complete.
   bool keep_source_table_;
 
