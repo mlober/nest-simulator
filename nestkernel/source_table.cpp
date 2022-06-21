@@ -331,6 +331,16 @@ nest::SourceTable::populate_target_data_fields_( const SourceTablePosition& curr
 
     TargetDataFields& target_fields = next_target_data.target_data;
     target_fields.set_syn_id( current_position.syn_id );
+
+    if ( kernel().connection_manager.has_long_delay() )
+    {
+      next_target_data.set_is_long_delay( true );
+    }
+    else
+    {
+      next_target_data.set_is_long_delay( false );
+    }
+
     if ( kernel().connection_manager.use_compressed_spikes() )
     {
       // WARNING: we set the tid field here to zero just to make sure

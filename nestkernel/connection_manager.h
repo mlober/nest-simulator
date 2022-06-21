@@ -251,6 +251,8 @@ public:
    */
   delay get_max_delay() const;
 
+  bool has_long_delay() const;
+
   bool get_user_set_delay_extrema() const;
 
   void
@@ -593,6 +595,8 @@ private:
 
   delay max_delay_; //!< Value of the largest delay in the network in steps.
 
+  delay threshold_delay_; //!< Value of the threshold for short and long delays.
+
   //! Whether to keep source table after connection setup is complete.
   bool keep_source_table_;
 
@@ -789,6 +793,18 @@ inline bool
 ConnectionManager::secondary_connections_exist() const
 {
   return secondary_connections_exist_;
+}
+
+inline bool
+ConnectionManager::has_long_delay( const thread tid, const synindex syn_id ) const
+{
+  bool has_long_delay_ = false;
+  auto delay_synapse_ = connections_[ tid ][ syn_id ]->delay();
+  if ( delay_synapse_ >= threshold_delay_ )
+  {
+    has_long_delay_ = true;
+  }
+  return has_long_delay_;
 }
 
 inline bool

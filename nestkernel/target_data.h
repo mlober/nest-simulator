@@ -180,6 +180,7 @@ private:
   static constexpr uint8_t NUM_BITS_LID = 19U;
   static constexpr uint8_t NUM_BITS_MARKER = 2U;
   static constexpr uint8_t NUM_BITS_IS_PRIMARY = 1U;
+  static constexpr uint8_t NUM_BITS_IS_LONG_DELAY = 1U;
 
   static constexpr int MAX_LID = generate_max_value( NUM_BITS_LID );
 
@@ -189,6 +190,7 @@ private:
   unsigned int marker_ : NUM_BITS_MARKER;
   //! TargetData has TargetDataFields else SecondaryTargetDataFields
   bool is_primary_ : NUM_BITS_IS_PRIMARY;
+  bool is_long_delay_ : NUM_BITS_IS_LONG_DELAY;
 
 public:
   //! variant fields
@@ -211,6 +213,8 @@ public:
   thread get_source_tid() const;
   void set_is_primary( const bool is_primary );
   bool is_primary() const;
+  void set_is_long_delay( const bool is_long_delay );
+  bool is_long_delay() const;
 };
 
 //! check legal size
@@ -294,6 +298,18 @@ inline bool
 TargetData::is_primary() const
 {
   return is_primary_;
+}
+
+inline void
+TargetData::set_is_long_delay( const bool is_long_delay )
+{
+  is_long_delay_ = is_long_delay;
+}
+
+inline bool
+TargetData::is_long_delay() const
+{
+  return is_long_delay_;
 }
 } // namespace nest
 
