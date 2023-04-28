@@ -28,6 +28,7 @@ results. The final weight obtained after simulation is compared to the final
 weight obtained from the test.
 """
 
+import sys
 import nest
 import pytest
 import numpy as np
@@ -41,6 +42,9 @@ def resetkernel():
 
     nest.ResetKernel()
 
+
+### Perform a NEST Simulation with STDP synapse
+
 # input parameters
 K_exc = 8000.
 K_inh = 2000.
@@ -51,7 +55,7 @@ w_inh = -5. * w_exc
 delay = 1.0
 axonal_delay = 0.0
 backpr_delay = delay - axonal_delay
-tau_minus = 30.
+tau_minus = 20.
 
 # stdp parameters
 stdp_params = {}
@@ -81,7 +85,7 @@ def setup_network_and_run_simulation():
     
     nest.Connect(pg_exc, neuron, syn_spec={'weight': w_exc, 'delay': delay})
     nest.Connect(pg_inh, neuron, syn_spec={'weight': w_inh, 'delay': delay})
-    nest.Connect(pg_pre, neuron, syn_spec={'weight': w_exc, 'delay': delay})
+    nest.Connect(pg_pre, parrot, syn_spec={'weight': w_exc, 'delay': delay})
 
     nest.Connect(parrot, neuron, syn_spec={'synapse_model': 'stdp_synapse', 'weight': w_exc, 'delay': delay})
 
@@ -100,37 +104,100 @@ def setup_network_and_run_simulation():
     return pre_spikes, post_spikes, final_weight
 
 
-pre_spikes, post_spikes, final_weight = setup_network_and_run_simulation()
+### Simulate synaptic weight change via STDP without using NEST
 
-# initial parameters
-K_plus = 0.
-K_minus = 0.
-last_pre = 0
-last_post = 0
-j = 0
-i = 0
+# define helper functions
 
-post_spike = post_spikes[i]
-pre_spike = pre_spikes[j]
-w = w_exc / stdp_params['Wmax']
-
-# define functions for weight update and spike times
-
-def update_K_plus(K_plus):
+def update_K_plus(K_plus, last_pre, pre_spike):
     K_plus = 1.0 + K_plus * np.exp((last_pre - pre_spike) / stdp_params['tau_plus'])
     return K_plus
 
 
-def update_K_minus(K_minus):
-    K_minus = 1.0 + K_minus * np.exp((last_pre - pre_spike) / stdp_params['tau_minus'])
+def update_K_minus(K_minus, last_post, post_spike):
+    K_minus = 1.0 + K_minus * np.exp((last_post - post_spike) / tau_minus)
     return K_minus
 
 
-def next_post_spike():
-    i += 1
-    last_post = post_spike
+def facilitate(w, K_plus, last_pre, post_spike):
+    w + stdp_params['lambda'] * (1.0-w)**stdp_params['mu_plus'] * K_plus * np.exp((last_pre-post_spike)/stdp_params['tau_plus'])
+    w = min(w, 1.0)
+    return w
+
+
+def depress(w, K_minus, last_post, pre_spike):
+    w + stdp_params['lambda'] * stdp_params['alpha'] * w**stdp_params['mu_minus'] * K_minus * np.exp((last_post-pre_spike)/tau_minus)
+    w = max(w, 0.) 
+    return w 
+
+
+def simulate_stdp(pre_spikes, post_spikes):
+    # initial parameters
+    finished = False
+    K_plus = 0.
+    K_minus = 0.
+    last_pre = 0
+    last_post = 0
+    j = 0
+    i = 0
+    pre_spike = pre_spikes[j]
     post_spike = post_spikes[i]
+    w = w_exc / stdp_params['Wmax']
+
+    while finished == False:
+        if pre_spike == post_spike:
+            # pre- and post-syn. spike at the same time
+            if last_post != post_spike:
+                w = facilitate(w, K_plus, last_pre, post_spike)
+            if last_pre != pre_spike:
+                w = depress(w, K_minus, last_post, pre_spike)
+
+            if j+1 < len(pre_spikes):
+                K_plus = update_K_plus(K_plus, last_pre, pre_spike)
+                j += 1
+                last_pre = pre_spike
+                pre_spike = pre_spikes[j]
+                if i+1 < len(post_spikes):
+                    K_minus = update_K_minus(K_minus, last_post, post_spike)
+                    i += 1
+                    last_post = post_spike
+                    post_spike = post_spikes[i]
+            else:
+                finished = True
+                exit
+
+        else:
+            if pre_spike < post_spike:
+                # next spike is a pre-syn. spike
+                w = depress(w, K_minus, last_post, pre_spike)
+                K_plus = update_K_plus(K_plus, last_pre, pre_spike)
+                if j+1 < len(pre_spikes):
+                    j += 1
+                    last_pre = pre_spike
+                    pre_spike = pre_spikes[j]
+                else:
+                    finished = True
+                    exit
+            else:
+
+                # next spike is a post-syn. spike
+                w = facilitate(w, K_plus, last_pre, post_spike)
+                K_minus = update_K_minus(K_minus, last_post, post_spike)
+                if i+1 < len(post_spikes):
+                    i += 1
+                    last_post = post_spike
+                    post_spike = post_spikes[i]
+                else:
+                    last_post = post_spike
+                    post_spike = pre_spikes[len(pre_spikes) - 1] + nest.resolution  # to make sure we don't come here again
+        
+        return w
 
 
-def facilitate():
-    
+def test_weight_simulation_equals_weight_loop():
+    pre_spikes, post_spikes, w_nest_simulation = setup_network_and_run_simulation()
+    w_minimal_simulation = simulate_stdp(pre_spikes, post_spikes)
+    w_minimal_simulation = w_minimal_simulation * stdp_params['Wmax']
+
+    assert w_nest_simulation == pytest.approx(w_minimal_simulation, 0.5)
+
+
